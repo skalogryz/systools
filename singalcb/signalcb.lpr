@@ -27,7 +27,7 @@ end;
 begin
   ParseCommandLine;
   if pid = 0 then begin
-    writeln('please specify PID to send ctrl+break to');
+    writeln('please specify PID to send ctrl+c to');
     ExitCode := 1;
     Exit;
   end;
