@@ -92,7 +92,19 @@ begin
 end;
 
 var
+  inWaiting : Boolean = false;
+
+function CtrlCHandler(dwCtrlType :DWORD):WINBOOL; stdcall;
+begin
+  // processed and we don't want to close THIS process
+  //if (inWaiting) then vrb('signal is blocked. ignoring termination. It''s us!');
+  Result := inWaiting;
+end;
+
+var
   h : Windows.THANDLE;
+  res : boolean;
+  ms : Int64;
 begin
     try
       ParseCommandLine;
@@ -104,7 +116,8 @@ begin
       end;
       vrb('----- started -----');
       vrb('pid: %d', [pid]);
-      vrb('verboseFile %s', [verboseFile]);
+      vrb('verboseFile: %s', [verboseFile]);
+
       writeln('pid: ', pid);
       h := OpenProcess(SYNCHRONIZE, false, pid);
       vrb('process handle = %d', [h]);
@@ -113,29 +126,55 @@ begin
         vrb('unable to open process: %d',[GetLasterror]);
       end;
 
-      if not FreeConsole then begin
+      res := FreeConsole;
+      if not res then begin
         writeln('error freeing console: ', GetLastError);
         vrb('unable to free console: %d',[GetLasterror]);
       end else
         vrb('console freed!');
 
-      if not AttachConsole(pid) then begin
+      res := AttachConsole(pid);
+      if not res then begin
         vrb('unable to attach to console: %d. Exiting',[GetLasterror]);
         ExitCode := 1;
         exit;
       end;
 
+      if (waitProc) then begin
+        res := SetConsoleCtrlHandler(@CtrlCHandler, true);
+        //res := SetConsoleCtrlHandler(nil, false);
+        if not res then
+          vrb('installing ctrl handler failed')
+        else
+          vrb('installed ctrl handler to prevent termination');
+      end;
+
       vrb('generating ctrl+c event');
+      inWaiting := true;
       if not GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) then begin
         vrb('failed to generate the event. %d. Exiting',[GetLasterror]);
         ExitCode := 1;
+      end else begin
+        vrb('event passed through');
+        if (waitProc) then begin
+          vrb('freeing console...');
+          res := FreeConsole;
+          if not res then
+            vrb('failed to release the console that was signaled for Ctrl+c. Need to release it to wait for the process')
+          else
+            vrb('console is freed. we can wait for the process now');
+        end;
       end;
 
       if h<>INVALID_HANDLE_VALUE then begin
         vrb('finishing');
         if (waitProc) then begin
-          vrb('waiting for the process to finsih: %d', [waitTimeout]);
+          vrb('waiting for the process to finish: %d', [waitTimeout]);
+          inWaiting := false;
+          ms := int64(GetTickCount64);
           WaitForSingleObject(h, waitTimeout);
+          ms := int64(GetTickCount64) - ms;
+          vrb('closed in %d miliseconds', [ms]);
         end;
         vrb('closing handle');
         CloseHandle(h);
